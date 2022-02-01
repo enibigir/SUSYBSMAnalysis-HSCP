@@ -41,13 +41,11 @@ Analyzer::Analyzer(const edm::ParameterSet& iConfig)
       CaloMETToken_(consumes<std::vector<reco::CaloMET>>(iConfig.getParameter<edm::InputTag>("CaloMET"))),
       pileupInfoToken_(consumes<std::vector<PileupSummaryInfo>>(iConfig.getParameter<edm::InputTag>("pileupInfo"))),
       genParticleToken_(
-          consumes<std::vector<reco::GenParticle>>(iConfig.getParameter<edm::InputTag>("genParticleCollection")))
+          consumes<std::vector<reco::GenParticle>>(iConfig.getParameter<edm::InputTag>("genParticleCollection"))),
       // HLT triggers
-      ,
       trigger_met_(iConfig.getUntrackedParameter<vector<string>>("Trigger_MET")),
-      trigger_mu_(iConfig.getUntrackedParameter<vector<string>>("Trigger_Mu"))
-      // =========Analysis parameters================
-      ,
+      trigger_mu_(iConfig.getUntrackedParameter<vector<string>>("Trigger_Mu")),
+      // =========Analysis parameters===============
       TypeMode_(iConfig.getUntrackedParameter<unsigned int>("TypeMode")),
       SampleType_(iConfig.getUntrackedParameter<unsigned int>("SampleType")),
       SampleName_(iConfig.getUntrackedParameter<string>("SampleName")),
@@ -66,12 +64,11 @@ Analyzer::Analyzer(const edm::ParameterSet& iConfig)
       GlobalMinPt(iConfig.getUntrackedParameter<double>("GlobalMinPt")),
       GlobalMinTOF(iConfig.getUntrackedParameter<double>("GlobalMinTOF")),
       skipPixel(iConfig.getUntrackedParameter<bool>("skipPixel")),
-      useTemplateLayer(iConfig.getUntrackedParameter<bool>("useTemplateLayer"))
+      useTemplateLayer(iConfig.getUntrackedParameter<bool>("useTemplateLayer")),
       //,DeDxSF_0(iConfig.getUntrackedParameter<double>("DeDxSF_0"))
       //,DeDxSF_1(iConfig.getUntrackedParameter<double>("DeDxSF_1"))
       //,DeDxK(iConfig.getUntrackedParameter<double>("DeDxK"))
       //,DeDxC(iConfig.getUntrackedParameter<double>("DeDxC"))
-      ,
       DeDxTemplate(iConfig.getUntrackedParameter<string>("DeDxTemplate")),
       enableDeDxCalibration(iConfig.getUntrackedParameter<bool>("enableDeDxCalibration")),
       DeDxCalibration(iConfig.getUntrackedParameter<string>("DeDxCalibration")),
@@ -79,7 +76,11 @@ Analyzer::Analyzer(const edm::ParameterSet& iConfig)
       TimeOffset(iConfig.getUntrackedParameter<string>("TimeOffset")),
       FMIPX(iConfig.getUntrackedParameter<double>("FMIPX")),
       STree(iConfig.getUntrackedParameter<unsigned int>("saveTree")),
-      SGTree(iConfig.getUntrackedParameter<unsigned int>("saveGenTree")) {
+      SGTree(iConfig.getUntrackedParameter<unsigned int>("saveGenTree")),
+      pixelCPE_(iConfig.getParameter<std::string>("pixelCPE")),
+      trackProbQCut_(iConfig.getUntrackedParameter<double>("trackProbQCut")),
+      debugLevel_(iConfig.getUntrackedParameter<unsigned int>("debugLevel"))
+ {
   //now do what ever initialization is needed
   // define the selection to be considered later for the optimization
   // WARNING: recall that this has a huge impact on the analysis time AND on the output file size --> be carefull with your choice
@@ -198,6 +199,7 @@ void Analyzer::beginJob() {
 
 // ------------ method called for each event  ------------
 void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) {
+  static constexpr const char* const MOD = "Analyzer";
   using namespace edm;
 
   tuple->EventsTotal->Fill(0.0, EventWeight_);
@@ -227,8 +229,9 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
       else {LogWarning("Analyzer") << "PileupSummaryInfo Collection NotFound";}*/
     double PUWeight = mcWeight->getEventPUWeight(iEvent, pileupInfoToken_, PUSystFactor_);
     EventWeight_ = PUWeight;  // 1. : unweighted w.r.t pileup
-  } else
+  } else {
     EventWeight_ = 1.;
+  }
 
   vector<reco::GenParticle> genColl;
   double HSCPGenBeta1 = -1, HSCPGenBeta2 = -1;
@@ -276,14 +279,7 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
                  nn = 0;  //initialize counters: nw - wrong, na - other, nd - double charged, nn - neutral
 
     for (auto const& gen : genColl) {
-      if (gen.pt() < 5)
-        continue;
-      if (gen.status() != 1)
-        continue;
-      int AbsPdg = abs(gen.pdgId());
-      if (AbsPdg < 1000000 && AbsPdg != 17)
-        continue;
-
+      if (!isGoodGenHSCP(gen,false)) continue;
       // categorise event with R-hadrons for additional weighting-----------------------BEGIN
       int GenId = gen.pdgId();
       if (GenId == 1000612 || GenId == 1092214) {
@@ -294,7 +290,7 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
                  abs(GenId) == 1092114. || abs(GenId) == 1093324. || abs(GenId) == 1093214. || abs(GenId) == 1009333. ||
                  abs(GenId) == 1009223. || abs(GenId) == 1009113. || abs(GenId) == 1009313. || abs(GenId) == 1000993.) {
         nn += 1;  // count neutral
-      } else if (AbsPdg > 1000000) {
+      } else if (abs(GenId) > 1000000) {
         na += 1;
       }  // count other R-hadrons
       // categorise event with R-hadrons for additional weighting-----------------------BEGIN
@@ -315,14 +311,7 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
   vector<float> geneta;
   vector<float> genphi;
   for (auto const& gen : genColl) {
-    if (gen.pt() < 5)
-      continue;
-    if (gen.status() != 1)
-      continue;
-    int AbsPdg = abs(gen.pdgId());
-    if (AbsPdg < 1000000 && AbsPdg != 17)
-      continue;
-
+    if (!isGoodGenHSCP(gen,false)) continue;
     nrha++;
     //mk rhadron ntuple
     if (isSignal) {
@@ -336,7 +325,8 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
   }
   nrha = 0;
 
-  if (isSignal)
+  if (isSignal) {
+    if (debugLevel_ > 3 ) LogPrint(MOD) << "Fill GenTree with basics gen info";
     tuple_maker->fillGenTreeBranches(tuple,
                                      iEvent.id().run(),
                                      iEvent.id().event(),
@@ -348,7 +338,9 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
                                      genpt,
                                      geneta,
                                      genphi);
+  }
 
+  // Get trigger results for this event
   edm::Handle<edm::TriggerResults> triggerH;
   iEvent.getByToken(triggerResultsToken_, triggerH);
   const edm::TriggerNames& triggerNames = iEvent.triggerNames(*triggerH);
@@ -378,8 +370,10 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
   tuple->TotalEPU->Fill(0.0, EventWeight_ * PUSystFactor_[0]);
   //See if event passed signal triggers
   //WAIT//if(!PassTrigger(iEvent, isData, false, (is2016&&!is2016G)?&L1Emul:nullptr) ) {
-  if (!passTrigger(iEvent, isData)) {
-    return;
+  if (!isSignal) {  
+    if (!passTrigger(iEvent, isData)) {
+      if (debugLevel_ > 0 ) LogPrint(MOD) << "This event did not pass the needed triggers, skipping it";
+      return;
     //For TOF only analysis if the event doesn't pass the signal triggers check if it was triggered by the no BPTX cosmic trigger
     //If not TOF only then move to next event
     /*if(TypeMode_!=3) continue;
@@ -387,7 +381,8 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
 
     //If is cosmic event then switch plots to use to the ones for cosmics
     //WAIT//SamplePlots=&plotsMap[CosmicName];
-  }
+    }
+   }
   //WAIT//else if(TypeMode==3) {
   //WAIT//SamplePlots = &plotsMap[samples[s].Name];
   //WAIT//}
@@ -434,6 +429,18 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
       return;
     }
   }
+
+  // Retrieve tracker topology from geometry
+  edm::ESHandle<TrackerTopology> TopoHandle;
+  iSetup.get<TrackerTopologyRcd>().get(TopoHandle);
+  const TrackerTopology* tTopo = TopoHandle.product();
+
+  edm::ESHandle<TrackerGeometry> tkGeometry;
+  iSetup.get<TrackerDigiGeometryRecord>().get(tkGeometry);
+
+  // Retrieve CPE from the event setup
+  edm::ESHandle<PixelClusterParameterEstimator> pixelCPE;
+  iSetup.get<TkPixelCPERecord>().get(pixelCPE_, pixelCPE);
 
   //reinitialize the bookeeping array for each event
   for (unsigned int CutIndex = 0; CutIndex < CutPt_.size(); CutIndex++) {
@@ -609,35 +616,43 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
   std::vector<float> HSCP_GenPhi;
 
   //====================loop over HSCP candidates===================
+  if (debugLevel_ > 0 ) LogPrint(MOD) << "Loop over HSCP candidates:";
   for (const auto& hscp : iEvent.get(hscpToken_)) {
-    reco::MuonRef muon = hscp.muonRef();  //const reco::MuonRef& muon = hscp.muonRef();
+    if (debugLevel_> 0) LogPrint(MOD) << "  --------------------------------------------";
+    reco::MuonRef muon = hscp.muonRef();
 
     //For TOF only analysis use updated stand alone muon track.
     //Otherwise use inner tracker track
     reco::TrackRef track;
-    if (TypeMode_ != 3)
+    if (TypeMode_ != 3) {
       track = hscp.trackRef();
-    else {
-      if (muon.isNull())
+    } else {
+      if (muon.isNull()) {
+      if (debugLevel_> 0) LogPrint(MOD) << "  >> TOF only mode but there is no muon, skipping it";
         continue;
+      }
       track = muon->standAloneMuon();
     }
     //skip events without track
-    if (track.isNull())
+    if (track.isNull()) {
+      if (debugLevel_> 0) LogPrint(MOD) << "  >> Event has no track associated to this HSCP, skipping it";
       continue;
-    // FIXME jozze skip events with |Eta| > 0.9 (out of the barrel)
-    //if(track->eta()>0.9 || track->eta() < -0.9) continue;
+    }
 
     //require a track segment in the muon system
-    if (TypeMode_ > 1 && TypeMode_ != 5 && (muon.isNull() || !muon->isStandAloneMuon()))
+    if (TypeMode_ > 1 && TypeMode_ != 5 && (muon.isNull() || !muon->isStandAloneMuon())) {
+      if (debugLevel_> 0) LogPrint(MOD) << "  >> TypeMode_ > 1 && TypeMode_ != 5 && (muon.isNull() || !muon->isStandAloneMuon()), skipping it";
       continue;
-
+    }
     //Apply a scale factor to muon only analysis to account for differences seen in data/MC preselection efficiency
     //For eta regions where Data > MC no correction to be conservative
-    if (!isData && TypeMode_ == 3 && scaleFactor(track->eta()) < RNG->Uniform(0, 1))
+    if (!isData && TypeMode_ == 3 && scaleFactor(track->eta()) < RNG->Uniform(0, 1)) {
+      if (debugLevel_> 0) LogPrint(MOD) << "  >> This is a non-data but TOF onlypwd mode where the eta scale factor is non-uniform, skipping it";
       continue;
+    }
 
     HSCP_count++;
+    if (debugLevel_> 0) LogPrint(MOD) << "  >> This is HSCP candidate track " << HSCP_count ;
     std::vector<float> clust_charge;
     std::vector<float> clust_pathlength;
     std::vector<bool> clust_ClusterCleaning;
@@ -648,11 +663,24 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
     std::vector<bool> clust_isStrip;
     std::vector<bool> clust_isPixel;
 
+    float probQonTrack = 0.0;
+    float probXYonTrack = 0.0;
+    float probQonTrackNoLayer1 = 0.0;
+    float probXYonTrackNoLayer1 = 0.0;
+    int numRecHits = 0;
+    int numRecHitsNoLayer1 = 0;
+    float probQonTrackWMulti = 1;
+    float probXYonTrackWMulti = 1;
+    float probQonTrackWMultiNoLayer1 = 1;
+    float probXYonTrackWMultiNoLayer1 = 1;
+
     //for signal only, make sure that the candidate is associated to a true HSCP
     int ClosestGen;
-    if (isSignal && DistToHSCP(hscp, genColl, ClosestGen, TypeMode_) > 0.03)
+    if (isSignal && DistToHSCP(hscp, genColl, ClosestGen, TypeMode_) > 0.03) {
+      if (debugLevel_> 0) LogPrint(MOD) << "  >> Signal MC HSCP distance from gen to candidate is too big (" <<
+      DistToHSCP(hscp, genColl, ClosestGen, TypeMode_) << "), skipping it";
       continue;
-
+    }
     // we are losing some tracks due to HIP
     //WAIT//if(!isData && is2016 && !HIPTrackLossEmul.TrackSurvivesHIPInefficiency()) continue;
 
@@ -681,11 +709,16 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
       }
     }
 
-    if (!dedxHits)
-      continue;  // skip tracks without hits otherwise there will be a crash
+    // skip tracks without hits otherwise there will be a crash
+    if (!dedxHits) {
+      if (debugLevel_> 3) LogPrint(MOD) << "No dedxHits associated to this track, skipping it";
+      continue;
+    }
 
     int nofClust_dEdxLowerThan = 0;
     float factorChargeToE = 3.61 * pow(10, -6) * 247;
+
+    // Loop through the rechits on the given track
     for (unsigned int i = 0; i < dedxHits->size(); i++) {
       clust_charge.push_back(dedxHits->charge(i));
       clust_pathlength.push_back(dedxHits->pathlength(i));
@@ -693,24 +726,95 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
       clust_isPixel.push_back(dedxHits->detId(i) >= 3 ? false : true);
       clust_detid.push_back(dedxHits->detId(i));
       DetId detid(dedxHits->detId(i));
-      if (detid.subdetId() < 3)
-        continue;
-      const SiStripCluster* cluster = dedxHits->stripCluster(i);
-      std::vector<int> ampl = convert(cluster->amplitudes());
-      bool sat254 = false, sat255 = false;
-      for (unsigned int s = 0; s < ampl.size(); s++) {
-        if (ampl[s] >= 254)
-          sat254 = true;
-        if (ampl[s] == 255)
-          sat255 = true;
-      }
-      ampl = CrossTalkInv(ampl, 0.10, 0.04, true);
-      clust_ClusterCleaning.push_back(clusterCleaning(dedxHits->stripCluster(i), 1));
-      clust_nstrip.push_back(ampl.size());
-      clust_sat254.push_back(sat254);
-      clust_sat255.push_back(sat255);
-      if (dedxHits->charge(i) * factorChargeToE / dedxHits->pathlength(i) < FMIPX)
-        nofClust_dEdxLowerThan++;
+      if (detid.subdetId() < 3) {
+        // Calculate probQ and probXY for this pixel rechit
+        // Taking the pixel cluster
+        auto const* pixelCluster =  dedxHits->pixelCluster(i);
+        if (pixelCluster == nullptr) {
+           if (debugLevel_> 0) LogPrint(MOD) << "    >> No dedxHits associated to this pixel cluster, skipping it";
+           if (debugLevel_> 0) LogPrint(MOD) << "    >> At this point this should never happen";
+           continue;
+        }
+        // Check on which geometry unit the hit is
+        const GeomDetUnit& geomDet = *tkGeometry->idToDetUnit(detid);
+        // Get the local vector for the track direction
+        LocalVector lv = geomDet.toLocal(GlobalVector(track->px(), track->py(), track->pz()));
+        // Re-run the CPE on this cluster with the lv above
+        auto reCPE = std::get<2>(pixelCPE->getParameters(
+              *pixelCluster, geomDet, LocalTrajectoryParameters(dedxHits->pos(i), lv, track->charge())));
+        // extract probQ and probXY from this 
+        float probQ = SiPixelRecHitQuality::thePacking.probabilityQ(reCPE);
+        float probXY = SiPixelRecHitQuality::thePacking.probabilityXY(reCPE);
+        if (probQ > 0) {
+          numRecHits++;
+          // Calculate alpha term needed for the combination
+          probQonTrackWMulti *= probQ;
+          probXYonTrackWMulti *= probXY;
+        }
+        // Have a separate variable that excludes Layer 1
+        // Layer 1 was very noisy in 2017/2018
+
+        if (( detid.subdetId() == PixelSubdetector::PixelEndcap) || (detid.subdetId() == PixelSubdetector::PixelBarrel &&
+          tTopo->pxbLayer(detid) != 1)) {
+          float probQNoLayer1 = SiPixelRecHitQuality::thePacking.probabilityQ(reCPE);
+          float probXYNoLayer1 = SiPixelRecHitQuality::thePacking.probabilityXY(reCPE);
+          if (probQNoLayer1 > 0.f) {  // only save the non-zero rechits
+            numRecHitsNoLayer1++;
+            // Calculate alpha term needed for the combination
+            probQonTrackWMultiNoLayer1 *= probQNoLayer1;
+            probXYonTrackWMultiNoLayer1 *= probXYNoLayer1;
+          }
+        }
+      } else if (detid.subdetId() >= 3) {
+        // Taking the strips cluster
+        auto const* stripsCluster = dedxHits->stripCluster(i);
+        if (stripsCluster== nullptr) {
+           if (debugLevel_> 0) LogPrint(MOD) << "    >> No dedxHits associated to this strips cluster, skipping it";
+           if (debugLevel_> 0) LogPrint(MOD) << "    >> At this point this should never happen";
+           continue;
+        }
+        std::vector<int> ampl = convert(stripsCluster->amplitudes());
+        bool sat254 = false, sat255 = false;
+        for (unsigned int s = 0; s < ampl.size(); s++) {
+          if (ampl[s] >= 254)
+            sat254 = true;
+          if (ampl[s] == 255)
+            sat255 = true;
+        }
+        ampl = CrossTalkInv(ampl, 0.10, 0.04, true);
+        clust_ClusterCleaning.push_back(clusterCleaning(dedxHits->stripCluster(i), 1));
+        clust_nstrip.push_back(ampl.size());
+        clust_sat254.push_back(sat254);
+        clust_sat255.push_back(sat255);
+        if (dedxHits->charge(i) * factorChargeToE / dedxHits->pathlength(i) < FMIPX)
+          nofClust_dEdxLowerThan++;
+      } 
+    } // end loop on rechits on the given track
+
+    // Combine probQ-s into HSCP candidate (track) level quantity
+    probQonTrack = combineProbs(probQonTrackWMulti, numRecHits);
+    probXYonTrack = combineProbs(probXYonTrackWMulti, numRecHits);
+    probQonTrackNoLayer1 = combineProbs(probQonTrackWMultiNoLayer1, numRecHitsNoLayer1);
+    probXYonTrackNoLayer1 = combineProbs(probXYonTrackWMultiNoLayer1, numRecHitsNoLayer1);
+
+    // Cut away background events based on the probQ
+    if (probQonTrack > trackProbQCut_ || probQonTrackNoLayer1 > trackProbQCut_) {
+      if (debugLevel_ > 3) LogPrint(MOD) << "probQonTrack > trackProbQCut_, skipping it";
+      continue;
+    }
+
+    // Cleaning of tracks that had failed the template CPE (prob = 0.0 and prob = 1.0 cases)
+    if (probQonTrack == 0.0 || probQonTrackNoLayer1 == 0.0 || probQonTrack == 1.0 || probQonTrackNoLayer1 == 1.0) {
+      continue;
+    }
+
+    if (probXYonTrack < 0.01 || probXYonTrack > 0.99) {
+      if (debugLevel_ > 3) LogPrint(MOD) << "probXYonTrack < 0.01 or probXYonTrack > 0.99, skipping it";
+      continue;
+    }
+    if(probQonTrack!=0) {
+       cout << "  >> probQonTrack: " << probQonTrack << " and probXYonTrack: " << probXYonTrack << endl;
+       cout << "  >> probQonTrackNoLayer1: " << probQonTrackNoLayer1 << " and probXYonTrackNoLayer1: " << probXYonTrackNoLayer1 << endl;
     }
     float Fmip = (float)nofClust_dEdxLowerThan / (float)dedxHits->size();
 
@@ -719,7 +823,7 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
     unsigned int pdgId = 0;
     if (isSignal) {
       pdgId = genColl[ClosestGen].pdgId();
-      LogDebug("Analyzer") << "GenId  " << pdgId;
+      LogPrint(MOD) << "  >> GenId  " << pdgId;
     }
 
     double dEdxErr = 0;
@@ -954,19 +1058,16 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
 
       double genpT = -1.0;
       for (auto const gen : genColl) {
-        if (gen.pt() < 5)
-          continue;
-        if (gen.status() != 1)
-          continue;
-        int AbsPdg = abs(gen.pdgId());
-        if (AbsPdg != 17)
-          continue;
-
+        if (!isGoodGenHSCP(gen,false)) continue;
         double separation = deltaR(track->eta(), track->phi(), gen.eta(), gen.phi());
-        if (separation > 0.03)
+        if (separation > 0.03) {
+          if (debugLevel_ > 0) LogPrint(MOD) << "    >> Separation between track and gen is too big (" << separation << "), skipping it";
           continue;
-        genpT = gen.pt();
-        break;
+        } else {
+          if (debugLevel_ > 0) LogPrint(MOD) << "    >> Matching gen HSCP found!";
+          genpT = gen.pt();
+          break;
+        }
       }
       if (genpT > 0) {
         tuple->genrecopT->Fill(genpT, track->pt());
@@ -974,12 +1075,14 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
 
       // compute systematic due to momentum scale
       //WAIT//if(PassPreselection( hscp,  dedxHits, dedxSObj, dedxMObj, tof, dttof, csctof, ev,  NULL, -1,   PRescale, 0, 0)){..}
-      if (passPreselection(
-              hscp, dedxHits, dedxSObj, dedxMObj, tof, iEvent, EventWeight_, nullptr, -1, PRescale, 0, 0, 0)) {  //WAIT//
+        if (debugLevel_ > 2) LogPrint(MOD) << "      >> Check if we pass Preselection";
+        if (passPreselection(
+              hscp, dedxHits, dedxSObj, dedxMObj, tof, iEvent, EventWeight_, nullptr, -1, PRescale, 0, 0, 0)) {
         double RescalingFactor = RescaledPt(track->pt(), track->eta(), track->phi(), track->charge()) / track->pt();
 
         if (TypeMode_ == 5 && isSemiCosmicSB)
           continue;
+        if (debugLevel_ > 2) LogPrint(MOD) << "      >> Get the mass of this HSCP";
         double Mass = -1;
         if (dedxMObj)
           Mass = GetMass(track->p() * RescalingFactor, dedxMObj->dEdx(), DeDxK, DeDxC);
@@ -1019,7 +1122,7 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
             tuple->MassComb_SystP->Fill(CutIndex, MassComb, EventWeight_);
           }
         }
-      }
+      } // end condition on the preselection
 
       // compute systematic due to dEdx (both Ias and Ih)
       //WAIT//if(PassPreselection( hscp,  dedxHits, dedxSObj, dedxMObj, tof, dttof, csctof, ev,  NULL, -1,   0, IRescale, 0))
@@ -1160,31 +1263,16 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
                                 GetMass(track->p(), dedxMObj ? dedxMObj->dEdx() : -1, DeDxK, DeDxC),
                                 DeDxK,
                                 DeDxC);
-    if (isBckg)
-      passPreselection(hscp, dedxHits, dedxSObj, dedxMObj, tof, iEvent, EventWeight_, tuple, -1, false, 0, 0, MassErr);
-    if (!passPreselection(hscp,
-                          dedxHits,
-                          dedxSObj,
-                          dedxMObj,
-                          tof,
-                          iEvent,
-                          EventWeight_,
-                          tuple,
-                          isSignal ? genColl[ClosestGen].p() / genColl[ClosestGen].energy() : -1,
-                          false,
-                          0,
-                          0,
-                          MassErr))
-      continue;
-    /*if(TypeMode==5 && isSemiCosmicSB)continue;*/
 
+    // Check if we pass the preselection for data / maybe background
     bool passPre = true;
     bool passPre_noIh_noIso = true;
 
     if (isBckg) {
+      // tav: what is happening here? it return a bool and then what?
       passPreselection(hscp, dedxHits, dedxSObj, dedxMObj, tof, iEvent, EventWeight_, tuple, -1, false, 0, 0, MassErr);
     }
-    if (!passPreselection(hscp,
+    passPre = (passPreselection(hscp,
                           dedxHits,
                           dedxSObj,
                           dedxMObj,
@@ -1196,10 +1284,9 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
                           false,
                           0,
                           0,
-                          MassErr))
-      passPre = false;
+                          MassErr)); 
 
-    if (!passPreselection(hscp,
+    passPre_noIh_noIso = (passPreselection(hscp,
                           dedxHits,
                           NULL,
                           NULL,
@@ -1212,11 +1299,10 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
                           0,
                           0,
                           MassErr,
-                          false))
-      passPre_noIh_noIso = false;
-
+                          false));
+    //WAIT//
     if (TypeMode_ == 5 && isSemiCosmicSB)
-      continue;  //WAIT//
+      continue;
 
     //fill the ABCD histograms and a few other control plots
     //WAIT//if(isData)Analysis_FillControlAndPredictionHist(hscp, dedxSObj, dedxMObj, tof, SamplePlots);
@@ -1373,7 +1459,7 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
         tuple->MassComb_SystHDown->Fill(CutIndex, MassDownComb, EventWeight_);
 
       }  //end of Cut loop
-    }
+    } // end of condition for passPre
 
     double Ick2 = 0;
     if (dedxMObj)
@@ -1606,11 +1692,6 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
       tuple->MaxEventMass_SystHDown->Fill(CutIndex, MaxMass_SystHDown[CutIndex], EventWeight_);
     }
   }
-
-#ifdef THIS_IS_AN_EVENTSETUP_EXAMPLE
-  ESHandle<SetupData> pSetup;
-  iSetup.get<SetupRecord>().get(pSetup);
-#endif
 }
 
 // ------------ method called once each job just after ending the event loop  ------------
@@ -2639,3 +2720,28 @@ void Analyzer::isPixelTrack(const edm::Ref<std::vector<Trajectory>>& refTraj, bo
       break;
   }
 }
+
+//=============================================================
+//
+//     Combine individual probs into a track level one
+//
+//=============================================================
+float Analyzer::combineProbs(float probOnTrackWMulti, int numRecHits) const {
+  float logprobOnTrackWMulti = probOnTrackWMulti > 0 ? log(probOnTrackWMulti) : 0;
+  float factQ = -logprobOnTrackWMulti;
+  float probOnTrackTerm = 0.f;
+
+  if (numRecHits == 1) {
+    probOnTrackTerm = 1.f;
+  } else if (numRecHits > 1) {
+    probOnTrackTerm = 1.f + factQ;
+    for (int iTkRh = 2; iTkRh < numRecHits; ++iTkRh) {
+      factQ *= -logprobOnTrackWMulti / float(iTkRh);
+      probOnTrackTerm += factQ;
+    }
+  }
+  float probOnTrack = probOnTrackWMulti * probOnTrackTerm;
+
+  return probOnTrack;
+}
+
