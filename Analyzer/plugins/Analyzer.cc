@@ -626,9 +626,9 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
       float shift_up   = mg_scale->GetEYhigh()[j]; 
       float shift_down = mg_scale->GetEYlow()[j];
       if (digluino_pt > pT_LowerEdge && digluino_pt <= pT_UpperEdge){
-        mg_weight[0] = weight;
-        mg_weight[1] = weight+shift_up;
-        mg_weight[2] = weight-shift_down;
+        mg_weight.push_back(weight);
+        mg_weight.push_back(weight+shift_up);
+        mg_weight.push_back(weight-shift_down);
         //matched_pt = pT_UpperEdge;
         break;
       }

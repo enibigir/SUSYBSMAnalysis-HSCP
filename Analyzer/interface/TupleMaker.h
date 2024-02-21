@@ -446,8 +446,8 @@ void TupleMaker::initializeTuple(Tuple *&tuple,
   tuple->NumEvents->GetXaxis()->SetBinLabel(4,"Events w/ event weights");
   tuple->NumEvents->GetXaxis()->SetBinLabel(5,"Events w/ DOWN systs on weights");
   tuple->NumEvents->GetXaxis()->SetBinLabel(6,"Events w/ event weights * radiation"); //LACEY (added bin number 6)
-  tuple->NumEvents->GetXaxis()->SetBinLabel(6,"Events w/ event weights * rad. Up");   //LACEY (added bin number 7)
-  tuple->NumEvents->GetXaxis()->SetBinLabel(6,"Events w/ event weights * rad. Down"); //LACEY (added bin number 8)
+  tuple->NumEvents->GetXaxis()->SetBinLabel(7,"Events w/ event weights * rad. Up");   //LACEY (added bin number 7)
+  tuple->NumEvents->GetXaxis()->SetBinLabel(8,"Events w/ event weights * rad. Down"); //LACEY (added bin number 8)
 
 
   tuple->dRMinHLTMuon = dir.make<TH1F>("dRMinHLTMuon", ";#Delta R_{min,muReco,HLT};Events / 0.04",100,0.,4.);
