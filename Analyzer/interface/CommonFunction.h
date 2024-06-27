@@ -1530,7 +1530,7 @@ reco::DeDxData computedEdx(const float& track_eta,
                            const float& track_px=0,
                            const float& track_py=0,
                            const float& track_pz=0,
-                           const int& track_charge=0) {
+                           const int& track_charge=0, bool DEBUG=false) {
 
   if (!dedxHits)
     return reco::DeDxData(-1, -1, -1);
@@ -1546,7 +1546,7 @@ reco::DeDxData computedEdx(const float& track_eta,
   iSetup.get<TkPixelCPERecord>().get(pixelCPE_, pixelCPE);
 
   // loop in order to have the number of saturated clusters in a track
-  unsigned int nsatclust = 0;
+  unsigned int nsatclust = 0;unsigned int NOM_StripOnly = 0;
   for (unsigned int t = 0; t < dedxHits->size(); t++) {
     DetId detid(dedxHits->detId(t));
     bool test_sat = false;
@@ -1763,7 +1763,7 @@ crossTalkInvAlgo=1;
         vectStrip.push_back(ChargeOverPathlength);
         //vectStrip.push_back(ClusterCharge/dedxHits->pathlength(h));
       //           printf("%i - %f / %f = %f\n", h, scaleFactor*Norm*dedxHits->charge(h), dedxHits->pathlength(h), ChargeOverPathlength);
-    }
+    }NOM_StripOnly++;
   }
 
   if (dropLowerDeDxValue > 0) {
@@ -1831,7 +1831,7 @@ crossTalkInvAlgo=1;
     }
   } else {
     result = -1;
-  }
+  }if (DEBUG) std::cout<<"\tEMERY::CURRENT Found "<<NSat<<" saturated cluster,NOM="<<NOM_StripOnly<<"("<<dedxHits->size()<<"), <dedx>="<<result<<std::endl;
   return reco::DeDxData(result, NSat, size);
 }
 #endif  //FWCORE

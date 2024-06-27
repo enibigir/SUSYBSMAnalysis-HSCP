@@ -224,7 +224,8 @@ Analyzer::Analyzer(const edm::ParameterSet& iConfig)
       hasMCMatch_(iConfig.getUntrackedParameter<bool>("HasMCMatch")),
       calcSyst_(iConfig.getUntrackedParameter<bool>("CalcSystematics")),
       calibrateTOF_(iConfig.getUntrackedParameter<bool>("CalibrateTOF")),
-      MG_FILENAME_(iConfig.getUntrackedParameter<string>("MG_FILENAME")) // LACEY
+      MG_FILENAME_(iConfig.getUntrackedParameter<string>("MG_FILENAME")), // LACEY
+      useMadGraphWeights_(iConfig.getUntrackedParameter<bool>("useMadGraphWeights")) // LACEY
 
  {
 //now do what ever initialization is needed
@@ -267,7 +268,7 @@ Analyzer::Analyzer(const edm::ParameterSet& iConfig)
   */
 
   // LACEY
-  if (MG_FILENAME_!=""){
+  if (useMadGraphWeights_){
     TFile* ratioFile = TFile::Open(MG_FILENAME_.c_str());
     mg_scale = (TGraphAsymmErrors*) ratioFile->Get("mg_py_stat");
   }
@@ -284,6 +285,8 @@ void Analyzer::beginJob() {
   // Book histograms using TFileService
   edm::Service<TFileService> fs;
   TFileDirectory dir = fs->mkdir(sampleName_.c_str(), sampleName_.c_str());
+  // LACEY
+  EventCutFlow_ = fs->make<TH1F>("EventCutFlow" , "EventCutFlow" , N_CUTS , -0.5 , float(N_CUTS)-0.5 );
   // create histograms & trees
   tuple = new Tuple();
   
@@ -392,6 +395,10 @@ void Analyzer::beginJob() {
 void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) {
   // if the only purpose is to trick CRAB to do a TAPERECALL
   if (tapeRecallOnly_) return;
+
+  // LACEY
+  /*bool EvtCuts[N_CUTS];
+  EvtCuts[0] = true;*/ EventCutFlow_->Fill(0);
   
   eventWeight_ = 1.;
   
@@ -614,7 +621,7 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
   } //loop over all gen particles
 
   // LACEY
-  if(MG_FILENAME_!=""){
+  if(useMadGraphWeights_){
     mg_weight.clear();
     float digluino_pt;
     if (gluino4vec.size() == 2)  digluino_pt = (gluino4vec[0] + gluino4vec[1]).Pt();
@@ -1173,9 +1180,6 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
     float muonIdSFsDown = (!isData) ? muonIdSFsForTrackEta(trigObjP4s[closestTrigObjIndex].Eta(), -1) : 1.;
     float muonTriggerSFsDown = (!isData) ? muonTriggerSFsForTrackEta(trigObjP4s[closestTrigObjIndex].Eta(), -1) : 1.;
     tuple->NumEvents->Fill(5., eventWeight_ * PUSystFactor_[1] * triggerSystFactorDown * muonRecoSFsDown * muonIdSFsDown * muonTriggerSFsDown * triggerSystFactorDown);
-    tuple->NumEvents->Fill(6., eventWeight_ * mg_weight[0]);//LACEY
-    tuple->NumEvents->Fill(7., eventWeight_ * mg_weight[1]);//LACEY
-    tuple->NumEvents->Fill(8., eventWeight_ * mg_weight[2]);//LACEY
   } else {
     if (debug_ > 2 ) LogPrint(MOD) << " > This event did not pass the needed triggers";
     if (createAndExitGitemplates_) {
@@ -2850,7 +2854,7 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
     auto dedxIh_StripOnly_Tmp =
     computedEdx(track->eta(), iSetup, run_number, year, dedxHits, dEdxSF, localdEdxTemplates = nullptr, usePixel = false, useStrip = true, useClusterCleaning, useTruncated = false,
                     mustBeInside, MaxStripNOM, correctFEDSat, crossTalkInvAlgo = 1, dropLowerDeDxValue = 0.0, &dEdxErr, useTemplateLayer_,
-                    false,0, false, false, true, pixelCPE_, tTopo, track->px(), track->py(), track->pz(), track->charge());
+                    false,0, false, false, true, pixelCPE_, tTopo, track->px(), track->py(), track->pz(), track->charge(),true);
 
     reco::DeDxData* dedxIh_StripOnly = dedxIh_StripOnly_Tmp.numberOfMeasurements() > 0 ? &dedxIh_StripOnly_Tmp : nullptr;
     
@@ -6996,6 +7000,12 @@ void Analyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) 
       }
     } // end of calcSyst_
   }
+  if ((trigInfo_ > 0)&&(HSCP_count>0)){
+    tuple->NumEvents->Fill(6., eventWeight_ * 1);           //LACEY
+    tuple->NumEvents->Fill(7., (useMadGraphWeights_) ? eventWeight_ * mg_weight[0] : eventWeight_ * 1);//LACEY
+    tuple->NumEvents->Fill(8., (useMadGraphWeights_) ? eventWeight_ * mg_weight[1] : eventWeight_ * 1);//LACEY
+    tuple->NumEvents->Fill(9., (useMadGraphWeights_) ? eventWeight_ * mg_weight[2] : eventWeight_ * 1);//LACEY
+  }
 } // end of analyze()
 
 
@@ -7040,6 +7050,13 @@ void Analyzer::endJob() {
   effHltMu50->Write();
   outputFile.Close();
   */
+ // LACEY
+ int N_CUTS = EventCutFlow_->GetNbinsX();
+  for(int i=0; i<N_CUTS; i++){
+    if (EventCutFlow_->GetBinContent(1)==0) break;
+    edm::LogPrint(MOD) <<  Form("%10s = %.0f \t:  %.3f", EventCutFlowLabels[i].c_str(), EventCutFlow_->GetBinContent(i+1), EventCutFlow_->GetBinContent(i+1)/EventCutFlow_->GetBinContent(1));
+    EventCutFlow_->GetXaxis()->SetBinLabel(i+1,EventCutFlowLabels[i].c_str());
+  }
 }
 
 // ------------ method fills 'descriptions' with the allowed parameters for the module  ------------
@@ -7269,6 +7286,7 @@ void Analyzer::fillDescriptions(edm::ConfigurationDescriptions& descriptions) {
   desc.addUntracked("GiSysParamTwo",0.0775)->setComment("Parameter B from above linear fit");
 
   desc.addUntracked<std::string>("MG_FILENAME","")->setComment("ROOT file for MG/Pythia weights"); // LACEY
+  desc.addUntracked("useMadGraphWeights",false); // LACEY
 
  descriptions.add("HSCParticleAnalyzer",desc);
 }

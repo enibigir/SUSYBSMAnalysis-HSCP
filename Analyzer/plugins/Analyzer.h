@@ -475,10 +475,15 @@ private:
   TEfficiency* effHltMu50PostS;
 
   //==========================
-  //    Lacey
+  // LACEY
   //==========================
   TGraphAsymmErrors *mg_scale;
   std::string MG_FILENAME_;
   std::vector<float> mg_weight;
+  bool useMadGraphWeights_;
+  TH1F* EventCutFlow_;
+  std::vector<std::string> EventCutFlowLabels = {"AllEvents"};//,">=1Vtx","PassedHLT","MatchedMu",">=1HSCP"};
+  const int N_CUTS = EventCutFlowLabels.size();
+  // LACEY
 };
 #endif

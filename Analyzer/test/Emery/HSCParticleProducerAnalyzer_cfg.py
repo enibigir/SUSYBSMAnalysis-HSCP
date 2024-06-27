@@ -24,9 +24,8 @@ options.register('isSkimmedSample', False,VarParsing.multiplicity.singleton,VarP
 options.register('LUMITOPROCESS', '',VarParsing.multiplicity.singleton,VarParsing.varType.string,
                  "Lumi to process"
 )
-options.register('MG_FILENAME', 'mg-py_ratio-1800GeV.root', VarParsing.multiplicity.singleton,VarParsing.varType.string,
-                 "MG to Pythia Ratio"
-)
+#options.register('MGFILENAME', 'mg-py_ratio-1800GeV.root', VarParsing.multiplicity.singleton,VarParsing.varType.string,"MG to Pythia Ratio")
+options.register('MGFILENAME', '', VarParsing.multiplicity.singleton,VarParsing.varType.string,"MG to Pythia Ratio")
 options.register('TapeRecallOnly',False, VarParsing.multiplicity.singleton,VarParsing.varType.bool,
                  "trick CRAB to do a TAPERECALL"
 )
@@ -45,6 +44,7 @@ def get_GTAG(year):
 ## print configuration:
 print('\n')
 print('CMSSW version : {}'.format(os.environ['CMSSW_VERSION']))
+print('SCRAM ARCH    : {}'.format(os.environ['SCRAM_ARCH']))
 print('Global Tag    : {}'.format(get_GTAG(options.YEAR)))
 if options.SAMPLE=='isData':
     print('Lumi File     : {}'.format(options.LUMITOPROCESS))
@@ -63,7 +63,7 @@ process.load('Configuration.StandardSequences.Services_cff')
 process.options   = cms.untracked.PSet(
 #      wantSummary = cms.untracked.bool(True),
 )
-process.MessageLogger.cerr.FwkReport.reportEvery = 1000
+process.MessageLogger.cerr.FwkReport.reportEvery = 1
 
 process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(options.maxEvents) )
 process.source = cms.Source("PoolSource",
@@ -85,7 +85,8 @@ process.HSCPTuplePath = cms.Path()
 
 #Run the HSCP EDM-tuple Sequence on skimmed sample
 process.nEventsBefEDM   = cms.EDProducer("EventCountProducer")
-process.load("SUSYBSMAnalysis.HSCP.HSCParticleProducer_cff") 
+process.load("SUSYBSMAnalysis.HSCP.HSCParticleProducer_cff")
+##process.HSCParticleProducer.filter = False
 process.HSCPTuplePath += process.nEventsBefEDM + process.HSCParticleProducerSeq
 
 ########################################################################  
@@ -270,7 +271,7 @@ else:
 process.load("SUSYBSMAnalysis.Analyzer.HSCParticleAnalyzer_cfi")
 process.HSCParticleAnalyzer.TypeMode = 0 # 0: Tracker only
 process.HSCParticleAnalyzer.SampleType = SampleType 
-process.HSCParticleAnalyzer.SaveTree = 0 #6 is all saved, 0 is none
+process.HSCParticleAnalyzer.SaveTree = 5 #6 is all saved, 0 is none
 process.HSCParticleAnalyzer.DeDxTemplate=IasTemplate
 process.HSCParticleAnalyzer.TimeOffset="MuonTimeOffset.txt"
 process.HSCParticleAnalyzer.Period = options.YEAR
@@ -280,7 +281,7 @@ process.HSCParticleAnalyzer.DeDxC = C
 process.HSCParticleAnalyzer.DeDxSF_0 = SF0
 process.HSCParticleAnalyzer.DeDxSF_1 = SF1
 process.HSCParticleAnalyzer.GlobalMinIh = C
-process.HSCParticleAnalyzer.MG_FILENAME = options.MG_FILENAME
+process.HSCParticleAnalyzer.MG_FILENAME = options.MGFILENAME
 process.HSCParticleAnalyzer.TapeRecallOnly = options.TapeRecallOnly
 
 process.TFileService = cms.Service("TFileService",
